@@ -48,7 +48,7 @@ Each algorithm is trained and evaluated under different environment configuratio
 ## Demo
 
 <p align="center">
-  <img src="./assets/bestperformingsalp.gif" width="60000"/>
+  <img src="./assets/bestperformingsalp.gif" width="600"/>
 </p>
 
 The demo visualizes a trained salp chain navigating toward a goal while maintaining structure and avoiding obstacles.
@@ -114,7 +114,7 @@ Agents act independently while optimizing a shared objective.
 
 ---
 
-## 📊 Outputs
+## Outputs
 
 * Logs → `csv_outputs/`
 * Plots → `outputs/`
