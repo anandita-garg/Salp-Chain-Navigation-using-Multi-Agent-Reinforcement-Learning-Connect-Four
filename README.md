@@ -3,3 +3,5 @@
 </p>
 
 <video src="./best performing salp.mp4" autoplay loop muted width="600"></video>
+
+![Demo](./best%20performing%20salp.gif)
