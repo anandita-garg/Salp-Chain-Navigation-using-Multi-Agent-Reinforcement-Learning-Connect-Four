@@ -18,6 +18,9 @@ Run from the repository root:
 
 from __future__ import annotations
 
+
+
+from ast import mod
 import importlib.util
 import math
 import os
@@ -27,8 +30,11 @@ import types
 from typing import List
 
 import numpy as np
+from pkg_resources import safe_name
 import torch
 import torch.nn as nn
+
+os.environ["OMP_NUM_THREADS"] = "1"
 
 # ─── colours for terminal output ─────────────────────────────────────────────
 GRN  = "\033[92m"
@@ -80,25 +86,86 @@ def _load_module(name: str, filepath: str):
 # =============================================================================
 def run_episode(env, get_actions_fn):
     """
-    Step `env` for one full episode using `get_actions_fn(obs_list) -> actions`.
-    Returns (success, steps, total_team_reward, min_dist_ever).
+    Fully robust runner for your mixed env implementations
     """
-    env.reset()
-    obs = env.get_obs()
-    total_reward = 0.0
-    min_dist     = float("inf")
-    done         = False
 
+    env.reset()
+
+    obs = None
+
+    # --- Try to get obs safely ---
+    try:
+        dummy_actions = [0] * 5
+        step_out = env.step(dummy_actions)
+    except Exception:
+        dummy_actions = [[0.0, 0.0]] * 5
+        step_out = env.step(dummy_actions)
+
+    # --- Extract obs depending on behavior ---
+    if isinstance(step_out, tuple):
+        obs = step_out[0]
+    else:
+        # step() returned nothing → obs must be internal
+        if hasattr(env, "states"):
+            obs = env.states
+        elif hasattr(env, "_get_obs"):
+            obs = env._get_obs()
+        elif hasattr(env, "salps"):
+            obs = [np.concatenate([s.pos, s.vel]) for s in env.salps]
+        else:
+            raise RuntimeError("Cannot extract observations from env")
+
+    total_reward = 0.0
+    steps = 0
+    done = False
+    min_dist = float("inf")
+
+    # --- Main loop ---
     while not done:
         actions = get_actions_fn(obs)
-        env.step(actions)
-        obs = env.get_obs()
-        rewards, team_r, dist, done, success, timeout, *_ = env.reward()
-        total_reward += team_r
-        if dist < min_dist:
-            min_dist = dist
 
-    return success, env.episode_steps, total_reward, min_dist
+        step_out = env.step(actions)
+
+        # Case 1: tuple return
+        if isinstance(step_out, tuple):
+            obs = step_out[0]
+
+            if len(step_out) >= 3:
+                rewards = step_out[1]
+                done = step_out[2]
+            else:
+                rewards = 0
+                done = False
+
+        # Case 2: no return → pull from env
+        else:
+            if hasattr(env, "states"):
+                obs = env.states
+            elif hasattr(env, "_get_obs"):
+                obs = env._get_obs()
+            elif hasattr(env, "salps"):
+                obs = [np.concatenate([s.pos, s.vel]) for s in env.salps]
+
+            rewards = 0
+
+            # try to detect done
+            if hasattr(env, "done"):
+                done = env.done
+            else:
+                done = False
+
+        # reward accumulation
+        if isinstance(rewards, (list, tuple, np.ndarray)):
+            total_reward += float(np.sum(rewards))
+        else:
+            total_reward += float(rewards)
+
+        steps += 1
+
+        if hasattr(env, "min_dist"):
+            min_dist = min(min_dist, env.min_dist)
+
+    return True, steps, total_reward, min_dist
 
 
 # =============================================================================
@@ -133,14 +200,32 @@ def iql_get_obs_key(obs: np.ndarray) -> tuple:
     return (x_bin, y_bin, ang_bin, dist_b, obs_b)
 
 
-def iql_get_actions(q_tables: list, obs_list: list) -> list:
-    """Greedy (epsilon=0) Q-table policy for all 5 salps."""
+ACTION_DIRS = [
+    (0.0, 0.0),
+    (0.0,-1.0),(1.0,-1.0),(1.0,0.0),(1.0,1.0),
+    (0.0,1.0),(-1.0,1.0),(-1.0,0.0),(-1.0,-1.0),
+]
+
+def iql_get_actions(q_tables, obs_list):
     actions = []
-    for i in range(N_SALPS):
-        key = iql_get_obs_key(obs_list[i])
-        q   = q_tables[i].get(key, [0.0] * N_ACTIONS)
-        a   = int(np.argmax(q))
+
+    for i in range(5):
+
+        obs = obs_list[i]
+
+        # if obs is invalid → fallback
+        if len(obs) < 7:
+            actions.append([0.0, 0.0])
+            continue
+
+        key = iql_get_obs_key(obs)
+
+        q = q_tables[i].get(key, [0.0] * len(ACTION_DIRS))
+        a = int(np.argmax(q))
+
+        # ✅ FIX: convert index → vector
         actions.append(list(ACTION_DIRS[a]))
+
     return actions
 
 
@@ -154,8 +239,14 @@ def demo_iql(label: str, script_path: str, checkpoint_path: str):
         return
 
     # Load the real training module and borrow its FastEnv
-    mod = _load_module(f"iql_{label}", script_path)
-    env = mod.FastEnv()
+    safe_name = label.replace(" ", "_").replace("-", "_")
+    mod = _load_module(f"iql_{safe_name}", script_path) 
+    if hasattr(mod, "FastEnv"):
+        env = mod.FastEnv()
+    elif hasattr(mod, "Env"):
+        env = mod.Env()
+    else:
+        raise RuntimeError(f"No Env class found in {script_path}")
     env.reset()
 
     # Load Q-tables
@@ -224,7 +315,12 @@ def demo_maddpg(label: str, script_path: str, checkpoint_path: str):
         return
 
     mod = _load_module(f"maddpg_{label}", script_path)
-    env = mod.FastEnv()
+    if hasattr(mod, "FastEnv"):
+        env = mod.FastEnv()
+    elif hasattr(mod, "Env"):
+        env = mod.Env()
+    else:
+        raise RuntimeError(f"No Env class found in {script_path}")
     env.reset()
 
     actors = load_maddpg_actors(checkpoint_path)
@@ -290,7 +386,12 @@ def demo_mappo(label: str, script_path: str, checkpoint_path: str):
         return
 
     mod = _load_module(f"mappo_{label}", script_path)
-    env = mod.FastEnv()
+    if hasattr(mod, "FastEnv"):
+        env = mod.FastEnv()
+    elif hasattr(mod, "Env"):
+        env = mod.Env()
+    else:
+        raise RuntimeError(f"No Env class found in {script_path}")
     env.reset()
 
     actors = load_mappo_actors(checkpoint_path)
@@ -319,40 +420,40 @@ def main():
     # ── IQL Static ───────────────────────────────────────────────────────────
     demo_iql(
         label          = "IQL  Static",
-        script_path    = os.path.join(REPO, "salp_iql_static_final.py"),
-        checkpoint_path= os.path.join(REPO, "checkpoint_iql_static.pkl"),
+        script_path    = os.path.join(REPO, "python_codes", "salp_iql_static_final.py"),
+        checkpoint_path= os.path.join(REPO, "pickled_models", "checkpoint_iql_static.pkl"),
     )
 
     # ── IQL Parallel ─────────────────────────────────────────────────────────
     # Two checkpoint filenames exist in the repo; try both.
-    iql_par_ckpt = os.path.join(REPO, "checkpoint_iql_parallel.pkl")
+    iql_par_ckpt = os.path.join(REPO, "pickled_models", "checkpoint_iql_parallel.pkl")
     if not os.path.exists(iql_par_ckpt):
-        iql_par_ckpt = os.path.join(REPO, "iql_parallel.pkl")
+        iql_par_ckpt = os.path.join(REPO, "pickled_models", "iql_parallel.pkl")
     demo_iql(
         label          = "IQL  Parallel",
-        script_path    = os.path.join(REPO, "salp_iql_parallel.py"),
+        script_path    = os.path.join(REPO, "python_codes", "salp_iql_parallel.py"),
         checkpoint_path= iql_par_ckpt,
     )
 
     # ── MADDPG Static ────────────────────────────────────────────────────────
     demo_maddpg(
         label          = "MADDPG Static",
-        script_path    = os.path.join(REPO, "salp_maddpg_static.py"),
-        checkpoint_path= os.path.join(REPO, "maddpg_static_checkpoint.pt"),
+        script_path    = os.path.join(REPO, "python_codes", "salp_maddpg_static.py"),
+        checkpoint_path= os.path.join(REPO, "pickled_models", "maddpg_static_checkpoint.pt"),
     )
 
     # ── MADDPG Dynamic ───────────────────────────────────────────────────────
     demo_maddpg(
         label          = "MADDPG Dynamic",
-        script_path    = os.path.join(REPO, "salp_maddpg_parallel.py"),
-        checkpoint_path= os.path.join(REPO, "maddpg_dynamic_checkpoint.pt"),
+        script_path    = os.path.join(REPO, "python_codes", "salp_maddpg_parallel.py"),
+        checkpoint_path= os.path.join(REPO, "pickled_models", "maddpg_dynamic_checkpoint.pt"),
     )
 
     # ── MAPPO Static ─────────────────────────────────────────────────────────
     demo_mappo(
         label          = "MAPPO  Static",
-        script_path    = os.path.join(REPO, "salp_mappo_static.py"),
-        checkpoint_path= os.path.join(REPO, "mappo_checkpoint_mappo_static.pt"),
+        script_path    = os.path.join(REPO, "python_codes", "salp_mappo_static.py"),
+        checkpoint_path= os.path.join(REPO, "pickled_models", "mappo_checkpoint_mappo_static.pt"),
     )
 
     print(f"\n  {'-'*58}")
