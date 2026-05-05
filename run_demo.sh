@@ -47,24 +47,9 @@ done
 [[ -z "$PYTHON" ]] && die "Python 3.8+ not found. Install from https://python.org"
 
 # ── 2. Dependencies ──────────────────────────────────────────────────────────
-info "Checking dependencies ..."
-
-install_if_missing() {
-    local pkg="$1" imp="${2:-$1}"
-    if ! $PYTHON -c "import $imp" &>/dev/null 2>&1; then
-        info "  Installing $pkg ..."
-        $PYTHON -m pip install --quiet "$pkg"
-        ok "  $pkg installed"
-    else
-        ok "  $imp"
-    fi
-}
-
-install_if_missing torch
-install_if_missing numpy
-install_if_missing pandas
-install_if_missing tqdm
-install_if_missing matplotlib
+info "Installing dependencies from requirements.txt ..."
+$PYTHON -m pip install --quiet -r "$SCRIPT_DIR/requirements.txt"
+ok "Dependencies installed"
 
 # ── 3. Check demo.py is present ──────────────────────────────────────────────
 [[ -f "$DEMO_SCRIPT" ]] || \
