@@ -32,23 +32,44 @@ echo -e "${BLD}${CYN}   Salp Chain Navigation · MARL Demo${RST}"
 echo -e "${BLD}${CYN}══════════════════════════════════════════════════════════${RST}"
 echo ""
 
-# ── 1. Python check ──────────────────────────────────────────────────────────
-info "Checking Python ..."
-PYTHON=""
-for cmd in python3 python; do
-    if command -v "$cmd" &>/dev/null; then
-        if "$cmd" -c "import sys; assert sys.version_info >= (3,8)" 2>/dev/null; then
-            PYTHON="$cmd"
-            ok "Found $cmd  ($($cmd --version 2>&1))"
-            break
-        fi
-    fi
-done
-[[ -z "$PYTHON" ]] && die "Python 3.8+ not found. Install from https://python.org"
+# ── 0. Install Python 3.12 ───────────────────────────────────────────────────
+info "Ensuring Python 3.12 is installed ..."
 
-# ── 2. Dependencies ──────────────────────────────────────────────────────────
+if ! command -v python3.12 &>/dev/null; then
+    info "Installing Python 3.12 ..."
+    apt update
+    apt install -y software-properties-common
+
+    # Add deadsnakes for newer Python
+    add-apt-repository ppa:deadsnakes/ppa -y
+    apt update
+
+    apt install -y python3.12 python3.12-venv python3.12-distutils
+    ok "Python 3.12 installed"
+fi
+
+PYTHON=python3.12
+
+# ── 1. Create virtual environment ────────────────────────────────────────────
+VENV_DIR="${SCRIPT_DIR}/.venv"
+
+if [[ ! -d "$VENV_DIR" ]]; then
+    info "Creating virtual environment ..."
+    $PYTHON -m venv "$VENV_DIR"
+    ok "Virtual environment created"
+fi
+
+# Activate venv
+source "$VENV_DIR/bin/activate"
+
+# ── 2. Upgrade pip ───────────────────────────────────────────────────────────
+info "Upgrading pip ..."
+python -m ensurepip --upgrade || true
+python -m pip install --upgrade pip
+
+# ── 3. Install dependencies ──────────────────────────────────────────────────
 info "Installing dependencies from requirements.txt ..."
-$PYTHON -m pip install --quiet -r "$SCRIPT_DIR/requirements.txt"
+pip install --quiet -r "$SCRIPT_DIR/requirements.txt"
 ok "Dependencies installed"
 
 # ── 3. Check demo.py is present ──────────────────────────────────────────────
