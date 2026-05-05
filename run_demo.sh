@@ -32,21 +32,43 @@ echo -e "${BLD}${CYN}   Salp Chain Navigation · MARL Demo${RST}"
 echo -e "${BLD}${CYN}══════════════════════════════════════════════════════════${RST}"
 echo ""
 
-# ── 0. Install Python 3.12 ───────────────────────────────────────────────────
+# ── 0. Install Python 3.12 from source ───────────────────────────────────────
 info "Ensuring Python 3.12 is installed ..."
 
 if ! command -v python3.12 &>/dev/null; then
-    info "Installing Python 3.12 ..."
-    apt update
-    apt install -y software-properties-common
+    info "Building Python 3.12 from source (this may take a few minutes) ..."
 
-    # Add deadsnakes for newer Python
-    add-apt-repository ppa:deadsnakes/ppa -y
     apt update
+    apt install -y \
+        build-essential \
+        zlib1g-dev \
+        libncurses5-dev \
+        libgdbm-dev \
+        libnss3-dev \
+        libssl-dev \
+        libreadline-dev \
+        libffi-dev \
+        wget \
+        libsqlite3-dev \
+        libbz2-dev
 
-    apt install -y python3.12 python3.12-venv python3.12-distutils
+    cd /tmp
+    wget https://www.python.org/ftp/python/3.12.3/Python-3.12.3.tgz
+    tar -xvf Python-3.12.3.tgz
+    cd Python-3.12.3
+
+    ./configure --enable-optimizations
+    make -j$(nproc)
+    make altinstall
+
+    cd /
+    rm -rf /tmp/Python-3.12.3*
+
     ok "Python 3.12 installed"
 fi
+
+PYTHON=python3.12
+ok "Using $($PYTHON --version)"
 
 PYTHON=python3.12
 
