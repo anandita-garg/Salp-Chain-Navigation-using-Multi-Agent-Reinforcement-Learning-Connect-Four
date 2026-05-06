@@ -28,16 +28,16 @@ The catch? Each agent in the chain has its own policy, its own observations, its
 
 ## Key Features
 
-** Rigid Chain Constraint**
+**Rigid Chain Constraint**
 Fixed inter-agent distances enforced at every timestep — no stretching, no breaking. The chain moves as one or not at all.
 
-** Physics-Based Dynamics**
+**Physics-Based Dynamics**
 Velocity, drag, and thrust modelling give the chain realistic, fluid-like movement behavior.
 
-** Polygon Obstacle Avoidance**
+**Polygon Obstacle Avoidance**
 Convex polygon collision detection. The world isn't empty — the chain has to *think* around obstacles.
 
-** Emergent Cooperation**
+**Emergent Cooperation**
 Agents share a collective reward signal. No agent wins unless the chain wins.
 
 ---
